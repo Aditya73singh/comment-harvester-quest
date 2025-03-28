@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { IconUser, IconSubreddit, IconUpvote, IconDate } from './ui/icons';
 import { RedditComment } from '../lib/api';
+import { Card, CardContent } from './ui/card';
 
 interface CommentCardProps {
   comment: RedditComment;
@@ -22,6 +23,9 @@ const CommentCard: React.FC<CommentCardProps> = ({ comment, index }) => {
   const formatUpvotes = (num: number): string => {
     return num >= 1000 ? `${(num / 1000).toFixed(1)}k` : num.toString();
   };
+
+  // Split comment body into paragraphs for better readability
+  const paragraphs = comment.body.split('\n');
 
   return (
     <div 
@@ -45,16 +49,17 @@ const CommentCard: React.FC<CommentCardProps> = ({ comment, index }) => {
         </div>
       </div>
       
-      <div className="mb-4 bg-card p-4 rounded-lg border border-border shadow-sm">
-        <p className="text-base leading-relaxed text-foreground whitespace-pre-line font-normal tracking-wide">
-          {comment.body.split('\n').map((paragraph, i) => (
-            <React.Fragment key={i}>
-              {paragraph}
-              {i < comment.body.split('\n').length - 1 && <br />}
-            </React.Fragment>
-          ))}
-        </p>
-      </div>
+      <Card className="mb-4 border-border/70 shadow-sm">
+        <CardContent className="pt-4">
+          <div className="comment-text">
+            {paragraphs.map((paragraph, i) => (
+              <p key={i} className={i < paragraphs.length - 1 ? "mb-3" : ""}>
+                {paragraph}
+              </p>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
       
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <div className={`flex items-center space-x-1 ${isHovered ? 'text-primary' : ''} transition-apple`}>
