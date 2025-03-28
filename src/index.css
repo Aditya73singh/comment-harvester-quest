@@ -131,6 +131,13 @@
   .comment-card {
     @apply bg-card p-6 rounded-2xl border border-border shadow-sm transition-apple;
   }
+
+  /* Comment text styles */
+  .comment-text {
+    @apply text-base leading-relaxed tracking-wide font-normal;
+    letter-spacing: 0.015em;
+    line-height: 1.6;
+  }
   
   /* Loading animation */
   .loader {

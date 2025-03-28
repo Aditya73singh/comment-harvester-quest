@@ -45,8 +45,15 @@ const CommentCard: React.FC<CommentCardProps> = ({ comment, index }) => {
         </div>
       </div>
       
-      <div className="mb-4 bg-background/50 p-3 rounded-lg border border-border/50">
-        <p className="text-base leading-relaxed text-foreground whitespace-pre-line font-normal">{comment.body}</p>
+      <div className="mb-4 bg-card p-4 rounded-lg border border-border shadow-sm">
+        <p className="text-base leading-relaxed text-foreground whitespace-pre-line font-normal tracking-wide">
+          {comment.body.split('\n').map((paragraph, i) => (
+            <React.Fragment key={i}>
+              {paragraph}
+              {i < comment.body.split('\n').length - 1 && <br />}
+            </React.Fragment>
+          ))}
+        </p>
       </div>
       
       <div className="flex items-center justify-between text-sm text-muted-foreground">
