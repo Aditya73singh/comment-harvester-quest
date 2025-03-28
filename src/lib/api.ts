@@ -18,7 +18,8 @@ const SUBREDDITS = [
   'technology', 'design', 'apple', 'programming', 'minimalism',
   'gaming', 'movies', 'science', 'askreddit', 'worldnews',
   'politics', 'music', 'books', 'food', 'travel',
-  'photography', 'diy', 'fitness', 'funny', 'todayilearned'
+  'photography', 'diy', 'fitness', 'funny', 'todayilearned',
+  'JEE', 'btechtards', 'TeenIndia' // Added the requested subreddits
 ];
 
 export async function searchComments(query: string): Promise<RedditComment[]> {
