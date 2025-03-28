@@ -13,29 +13,48 @@ export interface RedditComment {
   timestamp: string;
 }
 
+// Expanded list of subreddits for more variety
+const SUBREDDITS = [
+  'technology', 'design', 'apple', 'programming', 'minimalism',
+  'gaming', 'movies', 'science', 'askreddit', 'worldnews',
+  'politics', 'music', 'books', 'food', 'travel',
+  'photography', 'diy', 'fitness', 'funny', 'todayilearned'
+];
+
 export async function searchComments(query: string): Promise<RedditComment[]> {
   // For demo purposes, we'll use jsonplaceholder and transform the data
   try {
-    const response = await axios.get(`${API_URL}?postId=1`);
+    // Fetch more comments by getting multiple postIds
+    const requests = [1, 2, 3, 4, 5].map(postId => 
+      axios.get(`${API_URL}?postId=${postId}`)
+    );
     
-    // Transform the data to match our RedditComment interface
-    const comments: RedditComment[] = response.data.slice(0, 10).map((comment: any, index: number) => ({
-      id: comment.id.toString(),
-      author: comment.email.split('@')[0],
-      body: comment.body,
-      subreddit: ['technology', 'design', 'apple', 'programming', 'minimalism'][Math.floor(Math.random() * 5)],
-      upvotes: Math.floor(Math.random() * 1000),
-      timestamp: new Date(Date.now() - Math.floor(Math.random() * 10000000000)).toISOString()
-    }));
+    const responses = await Promise.all(requests);
+    
+    // Combine and transform all the data
+    const allComments: RedditComment[] = [];
+    
+    responses.forEach(response => {
+      const comments: RedditComment[] = response.data.map((comment: any) => ({
+        id: comment.id.toString(),
+        author: comment.email.split('@')[0],
+        body: comment.body,
+        subreddit: SUBREDDITS[Math.floor(Math.random() * SUBREDDITS.length)],
+        upvotes: Math.floor(Math.random() * 10000),
+        timestamp: new Date(Date.now() - Math.floor(Math.random() * 10000000000)).toISOString()
+      }));
+      
+      allComments.push(...comments);
+    });
     
     // Simple filtering based on query
     return query 
-      ? comments.filter(comment => 
+      ? allComments.filter(comment => 
           comment.body.toLowerCase().includes(query.toLowerCase()) ||
           comment.author.toLowerCase().includes(query.toLowerCase()) ||
           comment.subreddit.toLowerCase().includes(query.toLowerCase())
         )
-      : comments;
+      : allComments.slice(0, 30); // Limit to 30 comments when no query to avoid overwhelming the UI
   } catch (error) {
     console.error('Error fetching comments:', error);
     throw new Error('Failed to fetch comments');
