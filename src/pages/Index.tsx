@@ -11,14 +11,16 @@ const Index: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState<boolean>(false);
+  const [activeFilter, setActiveFilter] = useState<string>('all');
 
-  const handleSearch = async (query: string) => {
+  const handleSearch = async (query: string, filterType: string) => {
     try {
       setIsLoading(true);
       setError(null);
       setHasSearched(true);
+      setActiveFilter(filterType);
       
-      const results = await searchComments(query);
+      const results = await searchComments(query, filterType);
       
       setComments(results);
       setIsLoading(false);
@@ -26,12 +28,18 @@ const Index: React.FC = () => {
       if (results.length === 0) {
         toast({
           title: "No comments found",
-          description: "Try a different search term or subreddit",
+          description: "Try a different search term or filter",
         });
       } else {
+        const filterDescription = filterType !== 'all' 
+          ? ` with ${filterType} filter` 
+          : '';
+          
         toast({
           title: `Found ${results.length} comments`,
-          description: query ? `Showing results for "${query}"` : "Showing popular comments",
+          description: query 
+            ? `Showing results for "${query}"${filterDescription}` 
+            : `Showing popular comments${filterDescription}`,
         });
       }
       
@@ -56,6 +64,7 @@ const Index: React.FC = () => {
             comments={comments} 
             isLoading={isLoading} 
             error={error} 
+            filterType={activeFilter}
           />
           
           {!hasSearched && (

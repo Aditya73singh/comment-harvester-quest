@@ -8,12 +8,14 @@ interface CommentListProps {
   comments: RedditComment[];
   isLoading: boolean;
   error: string | null;
+  filterType?: string;
 }
 
 const CommentList: React.FC<CommentListProps> = ({ 
   comments, 
   isLoading, 
-  error 
+  error,
+  filterType = 'all'
 }) => {
   // Empty state - no search performed yet
   if (!isLoading && !error && comments.length === 0) {
@@ -46,7 +48,15 @@ const CommentList: React.FC<CommentListProps> = ({
     return (
       <div className="flex flex-col items-center justify-center p-12 animate-fade-in">
         <IconLoader className="w-8 h-8 text-primary animate-spin-slow" />
-        <p className="mt-4 text-muted-foreground">Searching comments...</p>
+        <p className="mt-4 text-muted-foreground">
+          {filterType === 'subreddit' 
+            ? 'Searching in subreddits...' 
+            : filterType === 'keyword' 
+              ? 'Searching by keywords...' 
+              : filterType === 'author'
+                ? 'Searching by author...'
+                : 'Searching comments...'}
+        </p>
       </div>
     );
   }

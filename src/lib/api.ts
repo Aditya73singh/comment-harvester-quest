@@ -1,4 +1,3 @@
-
 import axios from 'axios';
 
 export interface RedditComment {
@@ -13,12 +12,18 @@ export interface RedditComment {
 // Reddit API endpoints
 const REDDIT_API_BASE = 'https://www.reddit.com';
 
-export async function searchComments(query: string): Promise<RedditComment[]> {
+export async function searchComments(query: string, filterType: string = 'all'): Promise<RedditComment[]> {
   try {
-    // If no query is provided, fetch from popular subreddits
-    const subreddits = query 
-      ? [query] 
-      : ['technology', 'programming', 'JEE', 'btechtards', 'TeenIndia'];
+    let subreddits = ['technology', 'programming', 'JEE', 'btechtards', 'TeenIndia'];
+    
+    // If searching by subreddit, prioritize the query as a subreddit
+    if (filterType === 'subreddit' && query) {
+      subreddits = [query];
+    }
+    // Otherwise if no query, use the default subreddits
+    else if (query && filterType !== 'subreddit') {
+      // Keep the default subreddits
+    }
     
     // We'll request multiple subreddits to get a variety of comments
     const requests = subreddits.map(subreddit => 
@@ -75,13 +80,35 @@ export async function searchComments(query: string): Promise<RedditComment[]> {
       setTimeout(() => {
         let filteredComments = allComments;
         
-        // If we have a specific query, filter by it
-        if (query && !subreddits.includes(query)) {
-          filteredComments = allComments.filter(comment => 
-            comment.body.toLowerCase().includes(query.toLowerCase()) ||
-            comment.author.toLowerCase().includes(query.toLowerCase()) ||
-            comment.subreddit.toLowerCase().includes(query.toLowerCase())
-          );
+        // Apply filtering based on the filter type
+        if (query) {
+          switch (filterType) {
+            case 'keyword':
+              filteredComments = allComments.filter(comment => 
+                comment.body.toLowerCase().includes(query.toLowerCase())
+              );
+              break;
+            case 'subreddit':
+              // Already filtered by subreddit in the API request if possible
+              // This is for exact matching
+              filteredComments = allComments.filter(comment => 
+                comment.subreddit.toLowerCase() === query.toLowerCase()
+              );
+              break;
+            case 'author':
+              filteredComments = allComments.filter(comment => 
+                comment.author.toLowerCase().includes(query.toLowerCase())
+              );
+              break;
+            case 'all':
+            default:
+              filteredComments = allComments.filter(comment => 
+                comment.body.toLowerCase().includes(query.toLowerCase()) ||
+                comment.author.toLowerCase().includes(query.toLowerCase()) ||
+                comment.subreddit.toLowerCase().includes(query.toLowerCase())
+              );
+              break;
+          }
         }
         
         resolve(filteredComments);
