@@ -20,31 +20,28 @@ const Index: React.FC = () => {
       
       const results = await searchComments(query);
       
-      // Small delay for animation smoothness
-      setTimeout(() => {
-        setComments(results);
-        setIsLoading(false);
-        
-        if (results.length === 0) {
-          toast({
-            title: "No results found",
-            description: "Try a different search term",
-          });
-        } else {
-          toast({
-            title: `Found ${results.length} comments`,
-            description: "Showing the most relevant results",
-          });
-        }
-      }, 800);
+      setComments(results);
+      setIsLoading(false);
+      
+      if (results.length === 0) {
+        toast({
+          title: "No comments found",
+          description: "Try a different search term or subreddit",
+        });
+      } else {
+        toast({
+          title: `Found ${results.length} comments`,
+          description: query ? `Showing results for "${query}"` : "Showing popular comments",
+        });
+      }
       
     } catch (err) {
       setIsLoading(false);
-      setError('Failed to fetch comments. Please try again.');
+      setError('Failed to fetch comments from Reddit. Please try again.');
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to fetch comments. Please try again.",
+        description: "Failed to fetch comments from Reddit. Please try again.",
       });
     }
   };
@@ -64,7 +61,7 @@ const Index: React.FC = () => {
           {!hasSearched && (
             <div className="absolute bottom-8 left-0 right-0 flex justify-center animate-fade-in opacity-70">
               <div className="glass px-4 py-2 rounded-full text-xs text-muted-foreground">
-                Use the search bar above to find comments
+                Search for a topic or subreddit above to find real Reddit comments
               </div>
             </div>
           )}

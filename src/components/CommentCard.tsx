@@ -24,8 +24,20 @@ const CommentCard: React.FC<CommentCardProps> = ({ comment, index }) => {
     return num >= 1000 ? `${(num / 1000).toFixed(1)}k` : num.toString();
   };
 
+  // Process Reddit markdown (simple implementation)
+  const processRedditMarkdown = (text: string): string => {
+    // Handle basic markdown: bold, italic, links, bullet points
+    let processed = text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">$1</a>')
+      .replace(/^- (.*)/gm, '• $1');
+    
+    return processed;
+  };
+
   // Split comment body into paragraphs for better readability
-  const paragraphs = comment.body.split('\n');
+  const paragraphs = comment.body.split('\n\n');
 
   return (
     <div 
@@ -53,9 +65,11 @@ const CommentCard: React.FC<CommentCardProps> = ({ comment, index }) => {
         <CardContent className="pt-4">
           <div className="comment-text">
             {paragraphs.map((paragraph, i) => (
-              <p key={i} className={i < paragraphs.length - 1 ? "mb-3" : ""}>
-                {paragraph}
-              </p>
+              <p 
+                key={i} 
+                className={i < paragraphs.length - 1 ? "mb-3" : ""}
+                dangerouslySetInnerHTML={{ __html: processRedditMarkdown(paragraph) }}
+              />
             ))}
           </div>
         </CardContent>
