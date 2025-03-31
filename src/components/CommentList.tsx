@@ -50,12 +50,12 @@ const CommentList: React.FC<CommentListProps> = ({
         <IconLoader className="w-8 h-8 text-primary animate-spin-slow" />
         <p className="mt-4 text-muted-foreground">
           {filterType === 'subreddit' 
-            ? 'Searching in subreddits...' 
+            ? 'Searching across Reddit subreddits...' 
             : filterType === 'keyword' 
               ? 'Searching by keywords...' 
               : filterType === 'author'
                 ? 'Searching by author...'
-                : 'Searching comments...'}
+                : 'Searching comments across Reddit...'}
         </p>
       </div>
     );

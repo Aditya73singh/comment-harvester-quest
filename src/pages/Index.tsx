@@ -12,6 +12,7 @@ const Index: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState<boolean>(false);
   const [activeFilter, setActiveFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   const handleSearch = async (query: string, filterType: string) => {
     try {
@@ -19,6 +20,7 @@ const Index: React.FC = () => {
       setError(null);
       setHasSearched(true);
       setActiveFilter(filterType);
+      setSearchQuery(query);
       
       const results = await searchComments(query, filterType);
       
@@ -31,6 +33,10 @@ const Index: React.FC = () => {
           description: "Try a different search term or filter",
         });
       } else {
+        // Count how many search terms were used
+        const searchTermCount = query.trim().split(/\s+/).filter(term => term.length > 0).length;
+        const searchTermText = searchTermCount > 1 ? `${searchTermCount} keywords` : "keyword";
+        
         const filterDescription = filterType !== 'all' 
           ? ` with ${filterType} filter` 
           : '';
@@ -38,7 +44,7 @@ const Index: React.FC = () => {
         toast({
           title: `Found ${results.length} comments`,
           description: query 
-            ? `Showing results for "${query}"${filterDescription}` 
+            ? `Showing results for ${searchTermText}: "${query}"${filterDescription}` 
             : `Showing popular comments${filterDescription}`,
         });
       }
@@ -60,6 +66,13 @@ const Index: React.FC = () => {
         <Header />
         <main className="container">
           <SearchBar onSearch={handleSearch} isLoading={isLoading} />
+          
+          {searchQuery && comments.length > 0 && (
+            <div className="text-center text-sm text-muted-foreground mb-6">
+              <p>Results ranked by most matching terms first</p>
+            </div>
+          )}
+          
           <CommentList 
             comments={comments} 
             isLoading={isLoading} 

@@ -106,7 +106,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading = false }) =>
           
           <div className="text-center">
             <p className="text-sm text-muted-foreground">
-              Try searching for "design", "technology", or "apple"
+              Try searching for multiple words like "design technology apple"
             </p>
           </div>
         </div>
