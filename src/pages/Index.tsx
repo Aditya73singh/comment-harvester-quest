@@ -45,17 +45,18 @@ const Index: React.FC = () => {
           title: `Found ${results.length} comments`,
           description: query 
             ? `Showing results for ${searchTermText}: "${query}"${filterDescription}` 
-            : `Showing popular comments${filterDescription}`,
+            : `Showing results${filterDescription}`,
         });
       }
       
     } catch (err) {
       setIsLoading(false);
-      setError('Failed to fetch comments from Reddit. Please try again.');
+      const errorMessage = "Failed to fetch comments from Reddit. Using backup data.";
+      setError(errorMessage);
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to fetch comments from Reddit. Please try again.",
+        description: errorMessage,
       });
     }
   };

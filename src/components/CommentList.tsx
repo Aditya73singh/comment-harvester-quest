@@ -3,6 +3,7 @@ import React from 'react';
 import CommentCard from './CommentCard';
 import { RedditComment } from '../lib/api';
 import { IconLoader } from './ui/icons';
+import { Alert, AlertTitle, AlertDescription } from './ui/alert';
 
 interface CommentListProps {
   comments: RedditComment[];
@@ -35,10 +36,10 @@ const CommentList: React.FC<CommentListProps> = ({
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center p-8 text-center animate-fade-in">
-        <div className="glass p-8 rounded-2xl max-w-md border-destructive/20">
-          <h3 className="text-xl font-medium mb-2 text-destructive">Error</h3>
-          <p className="text-muted-foreground">{error}</p>
-        </div>
+        <Alert variant="destructive" className="max-w-md">
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       </div>
     );
   }
