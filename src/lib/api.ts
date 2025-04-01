@@ -1,4 +1,3 @@
-
 import axios from 'axios';
 
 export interface RedditComment {
@@ -10,6 +9,11 @@ export interface RedditComment {
   timestamp: string;
   matchScore?: number; // Score for matching search terms
 }
+
+// Reddit API credentials
+const REDDIT_CLIENT_ID = 'xmNNjvzBns1KvnjE5M7WEg';
+// We'll use Application-Only OAuth flow which is safer than including the secret in the client
+// The secret is not included in the client-side code
 
 // Mock data to use when Reddit API fails
 const FALLBACK_COMMENTS: RedditComment[] = [
@@ -115,9 +119,41 @@ const FALLBACK_COMMENTS: RedditComment[] = [
 let useRedditAPI = true;
 let failureCount = 0;
 const MAX_FAILURES = 3;
+let accessToken: string | null = null;
+let tokenExpiration: number = 0;
 
-// Reddit API endpoints
-const REDDIT_API_BASE = 'https://www.reddit.com';
+// Function to get an OAuth token for Reddit API
+async function getRedditAccessToken(): Promise<string> {
+  // Check if we have a valid token
+  if (accessToken && tokenExpiration > Date.now()) {
+    return accessToken;
+  }
+
+  try {
+    // For application-only OAuth, we use a special endpoint with our client ID
+    const response = await axios({
+      method: 'post',
+      url: 'https://www.reddit.com/api/v1/access_token',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'web:reddit-comment-viewer:v1.0 (by /u/lovable-user)'
+      },
+      auth: {
+        username: REDDIT_CLIENT_ID,
+        password: '' // Empty password for app-only auth
+      },
+      data: 'grant_type=client_credentials'
+    });
+
+    accessToken = response.data.access_token;
+    // Set expiration (typically 1 hour, but we'll use 50 minutes to be safe)
+    tokenExpiration = Date.now() + (50 * 60 * 1000);
+    return accessToken;
+  } catch (error) {
+    console.error('Error getting Reddit access token:', error);
+    throw new Error('Failed to authenticate with Reddit');
+  }
+}
 
 export async function searchComments(query: string, filterType: string = 'all'): Promise<RedditComment[]> {
   try {
@@ -130,7 +166,17 @@ export async function searchComments(query: string, filterType: string = 'all'):
     // Parse the query into individual words for multi-word searching
     const searchTerms = query.toLowerCase().trim().split(/\s+/).filter(term => term.length > 0);
     
-    // Starting point - either use specific subreddit or search more broadly
+    // Get OAuth token for authenticated requests
+    let token;
+    try {
+      token = await getRedditAccessToken();
+    } catch (error) {
+      console.error('Authentication failed:', error);
+      // Fall back to unauthenticated requests if auth fails
+      token = null;
+    }
+    
+    // Starting point - search across all of Reddit
     let subreddits: string[] = [];
     let useDefaultSubreddits = true;
     
@@ -143,24 +189,34 @@ export async function searchComments(query: string, filterType: string = 'all'):
     
     // If we should use defaults or query is empty
     if (useDefaultSubreddits) {
-      // Include popular subreddits for general searches
-      subreddits = [
-        'technology', 'programming', 'AskReddit', 'explainlikeimfive', 
-        'science', 'todayilearned', 'worldnews'
-      ];
+      // Search across all of Reddit
+      subreddits = ['all'];
       
-      // Add "all" to search across all of Reddit
+      // Include some popular subreddits as fallbacks
       if (filterType !== 'subreddit') {
-        subreddits.push('all');
+        subreddits = subreddits.concat([
+          'technology', 'programming', 'AskReddit', 'explainlikeimfive', 
+          'science', 'todayilearned', 'worldnews'
+        ]);
       }
     }
     
     // Make requests to each subreddit with timeout to prevent hanging
-    const requests = subreddits.map(subreddit => 
-      axios.get(`${REDDIT_API_BASE}/r/${subreddit}.json?limit=20`, {
+    const requests = subreddits.map(subreddit => {
+      const headers: Record<string, string> = {
+        'User-Agent': 'web:reddit-comment-viewer:v1.0 (by /u/lovable-user)'
+      };
+      
+      // Add authorization header if we have a token
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      return axios.get(`https://www.reddit.com/r/${subreddit}.json?limit=25`, {
+        headers,
         timeout: 5000 // 5 second timeout
-      })
-    );
+      });
+    });
     
     // Use Promise.allSettled to handle partial failures
     const responses = await Promise.allSettled(requests);
@@ -206,9 +262,7 @@ export async function searchComments(query: string, filterType: string = 'all'):
         case 'keyword':
           filteredComments = allComments.filter(comment => {
             const commentText = comment.body.toLowerCase();
-            // Calculate how many search terms match in this comment
             const matchCount = searchTerms.filter(term => commentText.includes(term)).length;
-            // Only include comments that match at least one term
             if (matchCount > 0) {
               comment.matchScore = matchCount;
               return true;
@@ -217,7 +271,6 @@ export async function searchComments(query: string, filterType: string = 'all'):
           });
           break;
         case 'subreddit':
-          // For subreddit filter, include any comment whose subreddit matches the query exactly
           filteredComments = allComments.filter(comment => 
             comment.subreddit.toLowerCase() === query.toLowerCase()
           );
@@ -234,17 +287,14 @@ export async function searchComments(query: string, filterType: string = 'all'):
             const authorText = comment.author.toLowerCase();
             const subredditText = comment.subreddit.toLowerCase();
             
-            // Calculate match score based on how many search terms appear in the comment
             let matchCount = 0;
             
-            // Check each search term against different fields
             searchTerms.forEach(term => {
               if (commentText.includes(term)) matchCount++;
               if (authorText.includes(term)) matchCount++;
               if (subredditText.includes(term)) matchCount++;
             });
             
-            // Only include comments that match at least one term
             if (matchCount > 0) {
               comment.matchScore = matchCount;
               return true;
@@ -257,16 +307,13 @@ export async function searchComments(query: string, filterType: string = 'all'):
     
     // Sort results by match score, putting comments with more matching terms first
     filteredComments.sort((a, b) => {
-      // Default to 0 if matchScore is undefined
       const scoreA = a.matchScore || 0;
       const scoreB = b.matchScore || 0;
       
-      // Sort by match score first (higher is better)
       if (scoreB !== scoreA) {
         return scoreB - scoreA;
       }
       
-      // If match scores are equal, sort by upvotes
       return b.upvotes - a.upvotes;
     });
     
@@ -357,4 +404,3 @@ function filterMockComments(query: string, filterType: string): RedditComment[] 
   
   return filteredComments;
 }
-

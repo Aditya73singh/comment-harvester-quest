@@ -39,7 +39,7 @@ const Index: React.FC = () => {
         
         const filterDescription = filterType !== 'all' 
           ? ` with ${filterType} filter` 
-          : '';
+          : ' across all of Reddit';
           
         toast({
           title: `Found ${results.length} comments`,
