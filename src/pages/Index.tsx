@@ -22,7 +22,8 @@ const Index: React.FC = () => {
       setActiveFilter(filterType);
       setSearchQuery(query);
       
-      const results = await searchComments(query, filterType);
+      // Increase the limit to fetch more comments
+      const results = await searchComments(query, filterType, 50); // Fetch 50 comments
       
       setComments(results);
       setIsLoading(false);
