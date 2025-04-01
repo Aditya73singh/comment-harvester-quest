@@ -38,6 +38,7 @@ const CommentList: React.FC<CommentListProps> = ({
         <div className="glass p-8 rounded-2xl max-w-md border-destructive/20">
           <h3 className="text-xl font-medium mb-2 text-destructive">Error</h3>
           <p className="text-muted-foreground">{error}</p>
+          <p className="text-sm mt-2">Reddit API authentication may be required. Please try again.</p>
         </div>
       </div>
     );

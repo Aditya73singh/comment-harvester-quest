@@ -1,13 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { IconSearch, IconFilter } from './ui/icons';
-import { 
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue 
-} from './ui/select';
 import { Input } from './ui/input';
 import {
   DropdownMenu,
@@ -17,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { toast } from '@/components/ui/use-toast';
 
 interface SearchBarProps {
   onSearch: (query: string, filterType: string) => void;
@@ -31,8 +25,50 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading = false }) =>
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isLoading) {
-      onSearch(query.trim(), filterType);
+    
+    if (isLoading) return;
+    
+    if (!query.trim()) {
+      toast({
+        title: "Please enter a search term",
+        description: "Enter keywords, subreddit names, or author names to search",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    onSearch(query.trim(), filterType);
+  };
+
+  const handleFilterChange = (type: string) => {
+    setFilterType(type);
+    
+    // Show toast with filter guidance
+    switch (type) {
+      case 'keyword':
+        toast({
+          title: "Keyword Filter",
+          description: "Search for specific words or phrases in comments",
+        });
+        break;
+      case 'subreddit':
+        toast({
+          title: "Subreddit Filter",
+          description: "Enter a subreddit name to see comments from that community",
+        });
+        break;
+      case 'author':
+        toast({
+          title: "Author Filter",
+          description: "Enter a username to find comments from specific authors",
+        });
+        break;
+      case 'all':
+        toast({
+          title: "All Filter",
+          description: "Search across all comment text, authors, and subreddits",
+        });
+        break;
     }
   };
 
@@ -72,16 +108,16 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading = false }) =>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Filter by</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setFilterType('all')} className={filterType === 'all' ? 'bg-accent' : ''}>
+              <DropdownMenuItem onClick={() => handleFilterChange('all')} className={filterType === 'all' ? 'bg-accent' : ''}>
                 All
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setFilterType('keyword')} className={filterType === 'keyword' ? 'bg-accent' : ''}>
+              <DropdownMenuItem onClick={() => handleFilterChange('keyword')} className={filterType === 'keyword' ? 'bg-accent' : ''}>
                 Keyword
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setFilterType('subreddit')} className={filterType === 'subreddit' ? 'bg-accent' : ''}>
+              <DropdownMenuItem onClick={() => handleFilterChange('subreddit')} className={filterType === 'subreddit' ? 'bg-accent' : ''}>
                 Subreddit
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setFilterType('author')} className={filterType === 'author' ? 'bg-accent' : ''}>
+              <DropdownMenuItem onClick={() => handleFilterChange('author')} className={filterType === 'author' ? 'bg-accent' : ''}>
                 Author
               </DropdownMenuItem>
             </DropdownMenuContent>
