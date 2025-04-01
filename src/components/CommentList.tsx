@@ -22,9 +22,9 @@ const CommentList: React.FC<CommentListProps> = ({
     return (
       <div className="flex flex-col items-center justify-center p-8 text-center animate-fade-in">
         <div className="glass p-8 rounded-2xl max-w-md">
-          <h3 className="text-xl font-medium mb-2">No comments yet</h3>
+          <h3 className="text-xl font-medium mb-2">No comments found</h3>
           <p className="text-muted-foreground">
-            Search for topics to discover relevant comments
+            Try different search terms or filters. If Reddit API is unavailable, the app will show sample data for common search terms.
           </p>
         </div>
       </div>
@@ -38,7 +38,7 @@ const CommentList: React.FC<CommentListProps> = ({
         <div className="glass p-8 rounded-2xl max-w-md border-destructive/20">
           <h3 className="text-xl font-medium mb-2 text-destructive">Error</h3>
           <p className="text-muted-foreground">{error}</p>
-          <p className="text-sm mt-2">Reddit API authentication may be required. Please try again.</p>
+          <p className="text-sm mt-2">Reddit API authentication may be limited. Sample data will be shown instead.</p>
         </div>
       </div>
     );
