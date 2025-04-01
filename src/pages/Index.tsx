@@ -39,24 +39,23 @@ const Index: React.FC = () => {
         
         const filterDescription = filterType !== 'all' 
           ? ` with ${filterType} filter` 
-          : ' across all of Reddit';
+          : '';
           
         toast({
           title: `Found ${results.length} comments`,
           description: query 
             ? `Showing results for ${searchTermText}: "${query}"${filterDescription}` 
-            : `Showing results${filterDescription}`,
+            : `Showing popular comments${filterDescription}`,
         });
       }
       
     } catch (err) {
       setIsLoading(false);
-      const errorMessage = "Failed to fetch comments from Reddit. Using backup data.";
-      setError(errorMessage);
+      setError('Failed to fetch comments from Reddit. Please try again.');
       toast({
         variant: "destructive",
         title: "Error",
-        description: errorMessage,
+        description: "Failed to fetch comments from Reddit. Please try again.",
       });
     }
   };

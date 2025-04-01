@@ -55,7 +55,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading = false }) =>
               ref={inputRef}
               type="text"
               className="search-input text-lg border-0 shadow-none"
-              placeholder="Search Reddit comments..."
+              placeholder="Search for comments..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onFocus={() => setIsFocused(true)}
@@ -73,13 +73,13 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading = false }) =>
               <DropdownMenuLabel>Filter by</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setFilterType('all')} className={filterType === 'all' ? 'bg-accent' : ''}>
-                All of Reddit
+                All
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setFilterType('keyword')} className={filterType === 'keyword' ? 'bg-accent' : ''}>
-                Keyword only
+                Keyword
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setFilterType('subreddit')} className={filterType === 'subreddit' ? 'bg-accent' : ''}>
-                Specific subreddit
+                Subreddit
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setFilterType('author')} className={filterType === 'author' ? 'bg-accent' : ''}>
                 Author
@@ -99,14 +99,14 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading = false }) =>
           </button>
         </div>
         
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between text-sm gap-2">
+        <div className="flex items-center justify-between text-sm">
           <div className="text-muted-foreground">
-            Filtering by: <span className="font-medium text-foreground">{filterType === 'all' ? 'All of Reddit' : filterType.charAt(0).toUpperCase() + filterType.slice(1)}</span>
+            Filtering by: <span className="font-medium text-foreground">{filterType.charAt(0).toUpperCase() + filterType.slice(1)}</span>
           </div>
           
           <div className="text-center">
             <p className="text-sm text-muted-foreground">
-              Try searching multiple words like "design technology apple"
+              Try searching for multiple words like "design technology apple"
             </p>
           </div>
         </div>
