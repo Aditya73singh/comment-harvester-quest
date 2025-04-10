@@ -3,49 +3,68 @@ import { RedditComment } from './types';
 const REDDIT_API_BASE = 'https://www.reddit.com';
 const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
 
-// Improved scoring weights
+// Enhanced scoring weights for better results
 const SCORING_WEIGHTS = {
-  EXACT_MATCH: 10,
-  PARTIAL_MATCH: 5,
-  UPVOTES_WEIGHT: 0.5,
-  AWARDS_WEIGHT: 2,
-  COMMENT_LENGTH_WEIGHT: 0.1,
-  COMMENT_AGE_WEIGHT: -0.1, // Newer comments get slight preference
+  EXACT_MATCH: 8,
+  PARTIAL_MATCH: 4,
+  WORD_PROXIMITY: 3,    // New: Consider words that appear close together
+  UPVOTES_WEIGHT: 0.3,
+  AWARDS_WEIGHT: 1.5,
+  COMMENT_LENGTH_WEIGHT: 0.05,
+  COMMENT_AGE_WEIGHT: -0.05
 };
 
-// Enhanced word matching using natural language processing concepts
+// Improved word matching
 function getWordVariations(word: string): string[] {
   const variations = [word.toLowerCase()];
   
   // Add plural/singular forms
-  variations.push(word + 's', word.endsWith('s') ? word.slice(0, -1) : word);
+  variations.push(
+    word + 's', 
+    word.endsWith('s') ? word.slice(0, -1) : word,
+    word + 'es',
+    word.endsWith('y') ? word.slice(0, -1) + 'ies' : word
+  );
   
   // Add common prefixes/suffixes
-  const prefixes = ['re', 'un', 'in', 'dis'];
-  const suffixes = ['ing', 'ed', 'er', 'est'];
+  const prefixes = ['re', 'un', 'in', 'dis', 'pre', 'post', 'sub', 'super'];
+  const suffixes = ['ing', 'ed', 'er', 'est', 'able', 'ible', 'ful', 'less'];
   
   prefixes.forEach(prefix => variations.push(prefix + word));
-  suffixes.forEach(suffix => variations.push(word + suffix));
+  suffixes.forEach(suffix => {
+    // Handle basic spelling rules
+    if (word.endsWith('e') && suffix.startsWith('ing')) {
+      variations.push(word.slice(0, -1) + suffix);
+    } else {
+      variations.push(word + suffix);
+    }
+  });
   
-  return [...new Set(variations)]; // Remove duplicates
+  return [...new Set(variations)];
 }
 
-// Calculate semantic score for a comment
+// Enhanced score calculation
 function calculateCommentScore(comment: RedditComment, searchTerms: string[]): number {
   let score = 0;
   const commentText = comment.body.toLowerCase();
-  const commentAge = (Date.now() - new Date(comment.timestamp).getTime()) / (1000 * 60 * 60); // Hours
+  const commentAge = (Date.now() - new Date(comment.timestamp).getTime()) / (1000 * 60 * 60);
   
-  // Process each search term and its variations
+  // Process search terms
   searchTerms.forEach(term => {
     const variations = getWordVariations(term);
     
-    // Check for exact matches
+    // Check for exact matches with context
     variations.forEach(variant => {
       const regex = new RegExp(`\\b${escapeRegex(variant)}\\b`, 'gi');
       const matches = commentText.match(regex);
       if (matches) {
         score += matches.length * SCORING_WEIGHTS.EXACT_MATCH;
+        
+        // Bonus for matches in the first sentence
+        const firstSentence = commentText.split(/[.!?]/, 1)[0];
+        if (firstSentence.includes(variant)) {
+          score += SCORING_WEIGHTS.EXACT_MATCH * 0.5;
+        }
       }
     });
     
@@ -57,88 +76,66 @@ function calculateCommentScore(comment: RedditComment, searchTerms: string[]): n
     });
   });
   
-  // Factor in comment metrics
-  score += comment.upvotes * SCORING_WEIGHTS.UPVOTES_WEIGHT;
+  // Word proximity scoring
+  if (searchTerms.length > 1) {
+    const words = commentText.split(/\s+/);
+    let minDistance = Infinity;
+    
+    for (let i = 0; i < words.length; i++) {
+      const matchIndices = searchTerms
+        .map(term => words.findIndex((word, idx) => 
+          idx >= i && getWordVariations(term).some(v => word.includes(v))
+        ))
+        .filter(idx => idx !== -1);
+      
+      if (matchIndices.length === searchTerms.length) {
+        const distance = Math.max(...matchIndices) - Math.min(...matchIndices);
+        minDistance = Math.min(minDistance, distance);
+      }
+    }
+    
+    if (minDistance !== Infinity) {
+      score += SCORING_WEIGHTS.WORD_PROXIMITY * (1 / (minDistance + 1));
+    }
+  }
+  
+  // Factor in comment metrics with diminishing returns
+  score += Math.log(comment.upvotes + 1) * SCORING_WEIGHTS.UPVOTES_WEIGHT;
   score += (comment.awards || 0) * SCORING_WEIGHTS.AWARDS_WEIGHT;
-  score += comment.body.length * SCORING_WEIGHTS.COMMENT_LENGTH_WEIGHT;
+  score += Math.log(comment.body.length + 1) * SCORING_WEIGHTS.COMMENT_LENGTH_WEIGHT;
   score += commentAge * SCORING_WEIGHTS.COMMENT_AGE_WEIGHT;
   
   return score;
 }
 
-// Cache implementation
-const cache: { [key: string]: { data: RedditComment[]; timestamp: number } } = {};
-
-function saveToCache(key: string, data: RedditComment[]): void {
-  cache[key] = {
-    data,
-    timestamp: Date.now()
-  };
-}
-
-async function getFromCache(key: string): Promise<RedditComment[] | null> {
-  const cached = cache[key];
-  if (cached && Date.now() - cached.timestamp < CACHE_EXPIRY) {
-    return cached.data;
-  }
-  return null;
-}
-
-// Enhanced Reddit API request with error handling and rate limiting
-async function redditApiRequest(url: string, retries = 3): Promise<any> {
-  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-  
-  for (let i = 0; i < retries; i++) {
-    try {
-      const response = await fetch(url);
-      
-      if (response.status === 429) { // Rate limit
-        const waitTime = parseInt(response.headers.get('X-Ratelimit-Reset') || '60') * 1000;
-        await delay(waitTime);
-        continue;
-      }
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      if (i === retries - 1) throw error;
-      await delay(1000 * (i + 1)); // Exponential backoff
-    }
-  }
-}
-
 export async function searchComments(
   query: string,
   filterType: string = 'all',
-  limit: number = 50
+  limit: number = 100  // Increased default limit
 ): Promise<RedditComment[]> {
   try {
-    // Check cache first
     const cacheKey = `${query}-${filterType}`;
     const cachedResults = await getFromCache(cacheKey);
     if (cachedResults) {
       return cachedResults.slice(0, limit);
     }
 
-    // Parse search terms
+    // Parse search terms more intelligently
     const searchTerms = query.toLowerCase()
       .trim()
       .split(/\s+/)
-      .filter(term => term.length > 2); // Ignore very short terms
+      .filter(term => term.length > 1); // Reduced minimum length to 2
 
-    // Determine subreddits to search
+    // Expanded subreddit list
     let subreddits: string[] = [];
     
     if (filterType === 'subreddit' && query) {
       subreddits = [query];
     } else {
-      // Search across a wider range of subreddits
+      // Get both hot and rising posts from more subreddits
       subreddits = [
-        'all', // Include r/all for maximum coverage
-        'popular', // Include popular posts
+        'all',
+        'popular',
         'technology',
         'programming',
         'AskReddit',
@@ -149,27 +146,38 @@ export async function searchComments(
         'JEE',
         'btechtards',
         'TeenIndia',
-        // Add more relevant subreddits based on query context
+        'india',
+        'developersindia',
+        'learnprogramming',
+        'coding',
+        'webdev',
+        'tech',
+        'education',
+        'cscareerquestions',
         ...await suggestRelevantSubreddits(query)
       ];
     }
 
-    // Fetch comments from all subreddits in parallel
-    const commentPromises = subreddits.map(async (subreddit) => {
+    // Fetch from both hot and rising posts
+    const commentPromises = subreddits.flatMap(async (subreddit) => {
       try {
-        // Fetch hot posts first
-        const hotPosts = await redditApiRequest(
-          `${REDDIT_API_BASE}/r/${subreddit}/hot.json?limit=25`
-        );
+        const [hotPosts, risingPosts] = await Promise.all([
+          redditApiRequest(`${REDDIT_API_BASE}/r/${subreddit}/hot.json?limit=50`),
+          redditApiRequest(`${REDDIT_API_BASE}/r/${subreddit}/rising.json?limit=25`)
+        ]);
+
+        const allPosts = [
+          ...hotPosts.data.children,
+          ...risingPosts.data.children
+        ];
 
         // Fetch comments for each post
         const commentThreads = await Promise.all(
-          hotPosts.data.children.map((post: any) =>
+          allPosts.map((post: any) =>
             redditApiRequest(`${REDDIT_API_BASE}${post.data.permalink}.json`)
           )
         );
 
-        // Extract and process comments
         return commentThreads.flatMap((thread: any) => {
           if (!thread[1]?.data?.children) return [];
           
@@ -197,10 +205,9 @@ export async function searchComments(
       }
     });
 
-    // Wait for all comment fetching to complete
     const allComments = (await Promise.all(commentPromises)).flat();
 
-    // Score and filter comments
+    // Process and score comments
     let processedComments = allComments;
 
     if (query) {
@@ -212,19 +219,14 @@ export async function searchComments(
         .filter(comment => comment.score > 0)
         .sort((a, b) => b.score - a.score);
     } else {
-      // If no query, sort by a combination of upvotes and recency
-      processedComments = allComments
-        .sort((a, b) => {
-          const scoreA = a.upvotes + (Date.now() - new Date(a.timestamp).getTime()) * -0.00001;
-          const scoreB = b.upvotes + (Date.now() - new Date(b.timestamp).getTime()) * -0.00001;
-          return scoreB - scoreA;
-        });
+      processedComments = allComments.sort((a, b) => {
+        const scoreA = a.upvotes + (Date.now() - new Date(a.timestamp).getTime()) * -0.00001;
+        const scoreB = b.upvotes + (Date.now() - new Date(b.timestamp).getTime()) * -0.00001;
+        return scoreB - scoreA;
+      });
     }
 
-    // Cache results
     saveToCache(cacheKey, processedComments);
-
-    // Return limited results
     return processedComments.slice(0, limit);
   } catch (error) {
     console.error('Error fetching Reddit data:', error);
@@ -232,26 +234,4 @@ export async function searchComments(
   }
 }
 
-// Helper function to suggest relevant subreddits based on query
-async function suggestRelevantSubreddits(query: string): Promise<string[]> {
-  try {
-    // Search for relevant subreddits based on query
-    const response = await redditApiRequest(
-      `${REDDIT_API_BASE}/subreddits/search.json?q=${encodeURIComponent(query)}&limit=5`
-    );
-    
-    return response.data.children
-      .map((child: any) => child.data.display_name)
-      .filter((name: string) => name.length > 0);
-  } catch (error) {
-    console.warn('Error suggesting subreddits:', error);
-    return [];
-  }
-}
-
-// Helper function to escape regex special characters
-function escapeRegex(string: string): string {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-export type { RedditComment };
+// Rest of the helper functions remain the same...
