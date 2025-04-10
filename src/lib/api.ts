@@ -1,6 +1,10 @@
 import { RedditComment } from './types';
+import axios from 'axios';
 
-const REDDIT_API_BASE = 'https://www.reddit.com';
+const REDDIT_CLIENT_ID = 'xmNNjvzBns1KvnjE5M7WEg';
+const REDDIT_CLIENT_SECRET = 'N39e8RHrhC0XhHnxzUEhwkq5tbrJWw';
+const REDDIT_API_BASE = 'https://oauth.reddit.com';
+const REDDIT_AUTH_URL = 'https://www.reddit.com/api/v1/access_token';
 const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
 
 // Enhanced scoring weights for better results
