@@ -1,4 +1,3 @@
-
 import axios from 'axios';
 
 export interface RedditComment {
@@ -9,6 +8,7 @@ export interface RedditComment {
   upvotes: number;
   timestamp: string;
   matchScore?: number; // Score for matching search terms
+  score?: number;      // Combined score for sorting
 }
 
 // Reddit API credentials and endpoints
@@ -20,6 +20,42 @@ const REDDIT_AUTH_URL = 'https://www.reddit.com/api/v1/access_token';
 // Store OAuth token
 let accessToken: string | null = null;
 let tokenExpiration: number = 0;
+
+// Add a simple cache system for search results
+const searchCache = new Map<string, {
+  timestamp: number,
+  results: RedditComment[]
+}>();
+
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache duration
+
+// Helper function to escape regex special characters in user input
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getCacheKey(query: string, filterType: string): string {
+  return `${query.toLowerCase()}_${filterType}`;
+}
+
+async function getFromCache(query: string, filterType: string): Promise<RedditComment[] | null> {
+  const key = getCacheKey(query, filterType);
+  const cached = searchCache.get(key);
+  
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.results;
+  }
+  
+  return null;
+}
+
+function saveToCache(query: string, filterType: string, results: RedditComment[]): void {
+  const key = getCacheKey(query, filterType);
+  searchCache.set(key, {
+    timestamp: Date.now(),
+    results
+  });
+}
 
 // Get OAuth token for Reddit API
 async function getRedditAccessToken(): Promise<string> {
@@ -104,10 +140,27 @@ const mockComments: RedditComment[] = [
   }
 ];
 
-export async function searchComments(query: string, filterType: string = 'all'): Promise<RedditComment[]> {
+/**
+ * Search for Reddit comments based on query and filter type
+ * 
+ * @param query - The search terms
+ * @param filterType - Type of filtering ('all', 'keyword', 'subreddit', 'author')
+ * @param limit - Maximum number of results to return
+ * @returns Promise with array of RedditComment objects
+ */
+export async function searchComments(query: string, filterType: string = 'all', limit: number = 20): Promise<RedditComment[]> {
   try {
+    // Check cache first
+    const cachedResults = await getFromCache(query, filterType);
+    if (cachedResults) {
+      return cachedResults.slice(0, limit);
+    }
+
     // Parse the query into individual words for multi-word searching
     const searchTerms = query.toLowerCase().trim().split(/\s+/).filter(term => term.length > 0);
+    
+    // Create regexes for more robust matching
+    const regexes = searchTerms.map(term => new RegExp(escapeRegex(term), 'gi'));
     
     // Starting point - either use specific subreddit or search more broadly
     let subreddits: string[] = [];
@@ -136,7 +189,7 @@ export async function searchComments(query: string, filterType: string = 'all'):
     
     // Make requests to each subreddit
     const requests = subreddits.map(subreddit => 
-      redditApiRequest(`${REDDIT_API_BASE}/r/${subreddit}/hot.json?limit=20`)
+      redditApiRequest(`${REDDIT_API_BASE}/r/${subreddit}/hot.json?limit=${Math.min(25, limit)}`)
         .catch(err => {
           console.warn(`Error fetching from r/${subreddit}:`, err);
           return { data: { children: [] } }; // Return empty result on error
@@ -234,7 +287,31 @@ export async function searchComments(query: string, filterType: string = 'all'):
             });
           }
           
-          resolve(filteredMockComments);
+          // Calculate scores using regex matching and upvotes
+          filteredMockComments = filteredMockComments.map(comment => {
+            let matchCount = 0;
+            
+            // Count regex matches
+            regexes.forEach(re => {
+              const matches = comment.body.match(re);
+              if (matches) {
+                matchCount += matches.length;
+              }
+            });
+            
+            // Calculate combined score with upvotes
+            comment.score = matchCount + (comment.upvotes / 100);
+            return comment;
+          });
+          
+          // Sort by score descending
+          filteredMockComments.sort((a, b) => (b.score || 0) - (a.score || 0));
+          
+          // Cache the results
+          saveToCache(query, filterType, filteredMockComments);
+          
+          // Return limited results
+          resolve(filteredMockComments.slice(0, limit));
           return;
         }
         
@@ -246,11 +323,18 @@ export async function searchComments(query: string, filterType: string = 'all'):
             case 'keyword':
               filteredComments = allComments.filter(comment => {
                 const commentText = comment.body.toLowerCase();
-                // Calculate how many search terms match in this comment
-                const matchCount = searchTerms.filter(term => commentText.includes(term)).length;
+                // Calculate how many search terms match in this comment using regex
+                let matchCount = 0;
+                regexes.forEach(re => {
+                  const matches = comment.body.match(re);
+                  if (matches) matchCount += matches.length;
+                });
+                
                 // Only include comments that match at least one term
                 if (matchCount > 0) {
                   comment.matchScore = matchCount;
+                  // Calculate combined score with upvotes
+                  comment.score = matchCount + (comment.upvotes / 100);
                   return true;
                 }
                 return false;
@@ -261,11 +345,21 @@ export async function searchComments(query: string, filterType: string = 'all'):
               filteredComments = allComments.filter(comment => 
                 comment.subreddit.toLowerCase() === query.toLowerCase()
               );
+              // Calculate scores for sorting
+              filteredComments = filteredComments.map(comment => {
+                comment.score = comment.upvotes / 100; // Base score on upvotes for subreddit filter
+                return comment;
+              });
               break;
             case 'author':
               filteredComments = allComments.filter(comment => 
                 comment.author.toLowerCase().includes(query.toLowerCase())
               );
+              // Calculate scores for sorting
+              filteredComments = filteredComments.map(comment => {
+                comment.score = comment.upvotes / 100; // Base score on upvotes for author filter
+                return comment;
+              });
               break;
             case 'all':
             default:
@@ -274,19 +368,24 @@ export async function searchComments(query: string, filterType: string = 'all'):
                 const authorText = comment.author.toLowerCase();
                 const subredditText = comment.subreddit.toLowerCase();
                 
-                // Calculate match score based on how many search terms appear in the comment
+                // Calculate match score based on regex matches across fields
                 let matchCount = 0;
                 
-                // Check each search term against different fields
-                searchTerms.forEach(term => {
-                  if (commentText.includes(term)) matchCount++;
-                  if (authorText.includes(term)) matchCount++;
-                  if (subredditText.includes(term)) matchCount++;
+                // Count regex matches in comment text
+                regexes.forEach(re => {
+                  const bodyMatches = comment.body.match(re);
+                  if (bodyMatches) matchCount += bodyMatches.length;
+                  
+                  // Check author and subreddit too
+                  if (re.test(authorText)) matchCount++;
+                  if (re.test(subredditText)) matchCount++;
                 });
                 
                 // Only include comments that match at least one term
                 if (matchCount > 0) {
                   comment.matchScore = matchCount;
+                  // Calculate combined score with upvotes
+                  comment.score = matchCount + (comment.upvotes / 100);
                   return true;
                 }
                 return false;
@@ -295,28 +394,33 @@ export async function searchComments(query: string, filterType: string = 'all'):
           }
         }
         
-        // Sort results by match score, putting comments with more matching terms first
+        // Sort results by score, putting comments with better overall scores first
         filteredComments.sort((a, b) => {
-          // Default to 0 if matchScore is undefined
-          const scoreA = a.matchScore || 0;
-          const scoreB = b.matchScore || 0;
+          // Default to 0 if score is undefined
+          const scoreA = a.score || 0;
+          const scoreB = b.score || 0;
           
-          // Sort by match score first (higher is better)
-          if (scoreB !== scoreA) {
-            return scoreB - scoreA;
-          }
-          
-          // If match scores are equal, sort by upvotes
-          return b.upvotes - a.upvotes;
+          return scoreB - scoreA;
         });
         
-        resolve(filteredComments);
+        // Cache results before limiting
+        saveToCache(query, filterType, filteredComments);
+        
+        // Limit results
+        resolve(filteredComments.slice(0, limit));
       }, 2000); // Wait 2 seconds for comment data to start accumulating
     });
     
   } catch (error) {
     console.error('Error fetching Reddit data:', error);
     // Return mock data on error
-    return mockComments;
+    const filteredMockComments = mockComments.slice(0, limit);
+    
+    // Apply basic scoring to mock data
+    filteredMockComments.forEach(comment => {
+      comment.score = comment.upvotes / 100;
+    });
+    
+    return filteredMockComments;
   }
 }
