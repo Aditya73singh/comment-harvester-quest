@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-// Define the RedditComment interface
+// Enhanced RedditComment interface
 export interface RedditComment {
   id: string;
   author: string;
@@ -9,37 +8,32 @@ export interface RedditComment {
   subreddit: string;
   upvotes: number;
   timestamp: string;
-  matchScore?: number; // Score for matching search terms
-  score?: number; // Combined score for sorting
+  matchScore?: number;
+  score?: number;
+  url?: string;
 }
 
-// Reddit API credentials and endpoints
-const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID || 'xmNNjvzBns1KvnjE5M7WEg';
-const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET || 'N39e8RHrhC0XhHnxzUEhwkq5tbrJWw';
+// Configuration
 const REDDIT_API_BASE = 'https://oauth.reddit.com';
-const REDDIT_AUTH_URL = 'https://www.reddit.com/api/v1/access_token';
+const PUSHSHIFT_API = 'https://api.pushshift.io/reddit/comment/search';
+const MAX_RESULTS = 500; // Maximum comments to process
+const RATE_LIMIT_DELAY = 1000; // 1 second between requests
 
-// Store OAuth token
-let accessToken: string | null = null;
-let tokenExpiration: number = 0;
-
-// Add a simple cache system for search results
+// Cache system
 const searchCache = new Map<string, { timestamp: number, results: RedditComment[] }>();
-const CACHE_DURATION = process.env.CACHE_DURATION_MS ? parseInt(process.env.CACHE_DURATION_MS) : 5 * 60 * 1000; // 5 minutes
+const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
 
-// Helper function to escape regex special characters in user input
+// Helper functions
 function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Cache key generation
-function getCacheKey(query: string, filterType: string): string {
-  return `${query.toLowerCase()}_${filterType}`;
+function getCacheKey(query: string, filterType: string, source: string): string {
+  return `${source}_${query.toLowerCase()}_${filterType}`;
 }
 
-// Retrieve cached results
-async function getFromCache(query: string, filterType: string): Promise<RedditComment[] | null> {
-  const key = getCacheKey(query, filterType);
+async function getFromCache(query: string, filterType: string, source: string): Promise<RedditComment[] | null> {
+  const key = getCacheKey(query, filterType, source);
   const cached = searchCache.get(key);
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
     return cached.results;
@@ -47,341 +41,215 @@ async function getFromCache(query: string, filterType: string): Promise<RedditCo
   return null;
 }
 
-// Save results to cache
-function saveToCache(query: string, filterType: string, results: RedditComment[]): void {
-  const key = getCacheKey(query, filterType);
+function saveToCache(query: string, filterType: string, source: string, results: RedditComment[]): void {
+  const key = getCacheKey(query, filterType, source);
   searchCache.set(key, { timestamp: Date.now(), results });
 }
 
-// Base64 encoding utility
-function safeBase64Encode(str: string): string {
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(str).toString('base64');
-  }
-  return btoa(str);
-}
+// Enhanced scoring algorithm
+function calculateMatchScore(comment: RedditComment, terms: string[]): number {
+  let score = 0;
+  const fields = [
+    { text: comment.body, weight: 1.5 },
+    { text: comment.subreddit, weight: 1.2 },
+    { text: comment.author, weight: 1.0 }
+  ];
 
-// Get OAuth token for Reddit API
-async function getRedditAccessToken(): Promise<string> {
-  if (accessToken && Date.now() < tokenExpiration) {
-    return accessToken;
-  }
-  try {
-    const authString = safeBase64Encode(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`);
-    const response = await axios({
-      method: 'post',
-      url: REDDIT_AUTH_URL,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Basic ${authString}` },
-      data: 'grant_type=client_credentials',
-      timeout: 10000,
-    });
-    accessToken = response.data.access_token;
-    tokenExpiration = Date.now() + (response.data.expires_in * 1000) - 60000;
-    console.log('Successfully obtained Reddit access token');
-    return accessToken;
-  } catch (error) {
-    console.error('Error getting Reddit access token:', error);
-    throw new Error('Failed to authenticate with Reddit API');
-  }
-}
-
-// Make an authenticated request to Reddit API
-async function redditApiRequest(url: string): Promise<any> {
-  try {
-    const token = await getRedditAccessToken();
-    const response = await axios({
-      method: 'get',
-      url,
-      headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': 'web:CommentHarvester:v1.0 (by /u/commentharvester)' },
-      timeout: 15000,
-    });
-    return response.data;
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response) {
-      if (error.response.status === 429) {
-        console.error('Rate limited by Reddit API, consider adding delay between requests');
-      } else if (error.response.status === 401) {
-        accessToken = null;
-        tokenExpiration = 0;
-        console.error('Authentication error, will refresh token on next request');
-      }
+  terms.forEach(term => {
+    // Exact match bonus
+    if (comment.body.toLowerCase().includes(term.toLowerCase())) {
+      score += 5;
     }
-    console.error('Error making Reddit API request:', error);
-    throw error;
+
+    // Partial matches
+    fields.forEach(field => {
+      const matches = field.text.toLowerCase().match(new RegExp(term, 'gi'));
+      if (matches) score += matches.length * field.weight;
+    });
+  });
+
+  // Upvote weighting (logarithmic to prevent domination by popular posts)
+  score += Math.log10(comment.upvotes + 1);
+
+  return score;
+}
+
+// Pushshift.io search implementation
+async function searchWithPushshift(
+  query: string,
+  limit: number = 25,
+  timeFilter: string = 'year'
+): Promise<RedditComment[]> {
+  const cacheKey = `pushshift_${query}_${timeFilter}`;
+  const cached = await getFromCache(query, 'all', 'pushshift');
+  if (cached) return cached.slice(0, limit);
+
+  try {
+    const params = {
+      q: query,
+      size: Math.min(limit, 500),
+      sort_type: 'score',
+      sort: 'desc',
+      after: timeFilter === 'all' ? '0' : `${timeFilter}d`
+    };
+
+    const response = await axios.get(PUSHSHIFT_API, { params, timeout: 10000 });
+    const comments = response.data.data.map((item: any) => ({
+      id: item.id,
+      author: item.author,
+      body: item.body,
+      subreddit: item.subreddit,
+      upvotes: item.score,
+      timestamp: new Date(item.created_utc * 1000).toISOString(),
+      url: `https://reddit.com${item.permalink}`
+    }));
+
+    saveToCache(query, 'all', 'pushshift', comments);
+    return comments.slice(0, limit);
+  } catch (error) {
+    console.error('Pushshift search error:', error);
+    return [];
   }
 }
 
-// Mock comments for fallback
-const mockComments: RedditComment[] = [
-  { id: 'mock1', author: 'tech_enthusiast', body: 'Modern programming languages like Rust and Go are gaining popularity.', subreddit: 'programming', upvotes: 128, timestamp: new Date().toISOString() },
-  { id: 'mock2', author: 'science_lover', body: 'The James Webb Space Telescope has revolutionized our understanding of distant galaxies.', subreddit: 'science', upvotes: 243, timestamp: new Date().toISOString() },
-  { id: 'mock3', author: 'design_thinker', body: 'Apple prioritizes simplicity and user experience over feature bloat.', subreddit: 'technology', upvotes: 87, timestamp: new Date().toISOString() },
-];
+// Enhanced Reddit API search
+async function searchWithRedditAPI(
+  query: string,
+  limit: number = 25,
+  filterType: string = 'all',
+  timeFilter: string = 'year'
+): Promise<RedditComment[]> {
+  const cacheKey = `reddit_${query}_${filterType}_${timeFilter}`;
+  const cached = await getFromCache(query, filterType, 'reddit');
+  if (cached) return cached.slice(0, limit);
 
-// Search for Reddit comments based on query and filter type
-export async function searchComments(
+  try {
+    let url = `${REDDIT_API_BASE}/search.json?q=${encodeURIComponent(query)}&type=comment&limit=${limit}`;
+    
+    if (timeFilter !== 'all') {
+      url += `&t=${timeFilter}`;
+    }
+
+    if (filterType === 'subreddit') {
+      url = `${REDDIT_API_BASE}/r/${query}/comments.json?limit=${limit}`;
+    } else if (filterType === 'author') {
+      url = `${REDDIT_API_BASE}/user/${query}/comments.json?limit=${limit}`;
+    }
+
+    const response = await redditApiRequest(url);
+    const comments = response.data.children.map((item: any) => ({
+      id: item.data.id,
+      author: item.data.author,
+      body: item.data.body,
+      subreddit: item.data.subreddit,
+      upvotes: item.data.score,
+      timestamp: new Date(item.data.created_utc * 1000).toISOString(),
+      url: `https://reddit.com${item.data.permalink}`
+    }));
+
+    saveToCache(query, filterType, 'reddit', comments);
+    return comments;
+  } catch (error) {
+    console.error('Reddit API search error:', error);
+    return [];
+  }
+}
+
+// Combined search with all improvements
+export async function enhancedSearchComments(
   query: string,
   filterType: string = 'all',
-  limit: number = 20,
-  timeout: number = 2000
+  limit: number = 25,
+  timeout: number = 5000
 ): Promise<RedditComment[]> {
+  const searchTerms = query.toLowerCase().trim().split(/\s+/).filter(term => term.length > 0);
+  if (searchTerms.length === 0) return [];
+
+  // Time filters to try (most recent first)
+  const timeFilters = ['hour', 'day', 'week', 'month', 'year', 'all'];
+
   try {
-    const cachedResults = await getFromCache(query, filterType);
-    if (cachedResults) {
-      return cachedResults.slice(0, limit);
-    }
+    // Start all search strategies concurrently
+    const searchStrategies = [
+      // Pushshift searches (historical data)
+      ...timeFilters.map(time => 
+        searchWithPushshift(query, Math.ceil(limit / 3), time)
+          .catch(() => [] as RedditComment[])
+      ),
+      
+      // Reddit API searches (real-time data)
+      searchWithRedditAPI(query, limit, filterType, 'year'),
+      searchWithRedditAPI(query, limit, filterType, 'month'),
+      
+      // Alternative search endpoints
+      ...['hot', 'new', 'top', 'rising', 'controversial'].map(endpoint =>
+        redditApiRequest(`${REDDIT_API_BASE}/search.json?q=${query}&sort=${endpoint}&limit=${Math.ceil(limit / 5)}`)
+          .then(res => res.data.children.map(convertRedditItemToComment))
+          .catch(() => [] as RedditComment[])
+      )
+    ];
 
-    if (typeof query !== 'string') {
-      throw new Error('Query must be a string');
-    }
-    limit = Math.max(1, Math.min(limit, 100));
+    // Execute with timeout
+    const results = await Promise.race([
+      Promise.all(searchStrategies).then(arrays => arrays.flat()),
+      new Promise<RedditComment[]>(resolve => 
+        setTimeout(() => resolve([]), timeout)
+    ]);
 
-    const searchTerms = query.toLowerCase().trim().split(/\s+/).filter(term => term.length > 0);
-    const regexes = searchTerms.map(term => new RegExp(escapeRegex(term), 'gi'));
-
-    let subreddits: string[] = [];
-    let useDefaultSubreddits = true;
-
-    if (filterType === 'subreddit' && query) {
-      subreddits = [query];
-      useDefaultSubreddits = false;
-    }
-
-    if (useDefaultSubreddits) {
-      subreddits = ['technology', 'programming', 'science', 'AskReddit', 'worldnews'];
-      if (filterType !== 'subreddit') {
-        subreddits.push('all');
-      }
-    }
-
-    const MAX_CONCURRENT_REQUESTS = 3;
-    const chunks = [];
-    for (let i = 0; i < subreddits.length; i += MAX_CONCURRENT_REQUESTS) {
-      chunks.push(subreddits.slice(i, i + MAX_CONCURRENT_REQUESTS));
-    }
-
-    const allComments: RedditComment[] = [];
-    const commentRequests: Promise<void>[] = [];
-
-    for (const chunk of chunks) {
-      const requests = chunk.map(subreddit =>
-        redditApiRequest(`${REDDIT_API_BASE}/r/${subreddit}/hot.json?limit=${Math.min(25, limit)}`)
-          .catch(err => {
-            console.warn(`Error fetching from r/${subreddit}:`, err);
-            return { data: { children: [] } };
-          })
-      );
-      const chunkResponses = await Promise.allSettled(requests);
-      allResponses.push(...chunkResponses);
-
-      if (chunks.length > 1) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-    }
-
-    return new Promise((resolve) => {
-      const timeoutId = setTimeout(async () => {
-        try {
-          if (commentRequests.length > 0) {
-            await Promise.allSettled(commentRequests.slice(0, 5));
-          }
-
-          if (allComments.length === 0) {
-            console.log('Using mock data as fallback since API returned no comments');
-            let filteredMockComments = [...mockComments];
-            if (searchTerms.length > 0) {
-              filteredMockComments = mockComments.filter(comment => {
-                const commentText = comment.body.toLowerCase();
-                const authorText = comment.author.toLowerCase();
-                const subredditText = comment.subreddit.toLowerCase();
-                let matchCount = 0;
-                searchTerms.forEach(term => {
-                  if (commentText.includes(term)) matchCount++;
-                  if (authorText.includes(term)) matchCount++;
-                  if (subredditText.includes(term)) matchCount++;
-                });
-                if (matchCount > 0) {
-                  comment.matchScore = matchCount;
-                  return true;
-                }
-                return false;
-              });
-            }
-            filteredMockComments = filteredMockComments.map(comment => {
-              let matchCount = 0;
-              regexes.forEach(re => {
-                const matches = comment.body.match(re);
-                if (matches) {
-                  matchCount += matches.length;
-                }
-              });
-              comment.score = matchCount + (comment.upvotes / 100);
-              return comment;
-            });
-            filteredMockComments.sort((a, b) => (b.score || 0) - (a.score || 0));
-            saveToCache(query, filterType, filteredMockComments);
-            resolve(filteredMockComments.slice(0, limit));
-            return;
-          }
-
-          let filteredComments = allComments;
-
-          if (query) {
-            switch (filterType) {
-              case 'keyword':
-                filteredComments = allComments.filter(comment => {
-                  let matchCount = 0;
-                  regexes.forEach(re => {
-                    const matches = comment.body.match(re);
-                    if (matches) matchCount += matches.length;
-                  });
-                  if (matchCount > 0) {
-                    comment.matchScore = matchCount;
-                    comment.score = matchCount + (comment.upvotes / 100);
-                    return true;
-                  }
-                  return false;
-                });
-                break;
-              case 'subreddit':
-                filteredComments = allComments.filter(comment =>
-                  comment.subreddit.toLowerCase() === query.toLowerCase()
-                );
-                filteredComments = filteredComments.map(comment => {
-                  comment.score = comment.upvotes / 100;
-                  return comment;
-                });
-                break;
-              case 'author':
-                filteredComments = allComments.filter(comment =>
-                  comment.author.toLowerCase().includes(query.toLowerCase())
-                );
-                filteredComments = filteredComments.map(comment => {
-                  comment.score = comment.upvotes / 100;
-                  return comment;
-                });
-                break;
-              case 'all':
-              default:
-                filteredComments = allComments.filter(comment => {
-                  const commentText = comment.body.toLowerCase();
-                  const authorText = comment.author.toLowerCase();
-                  const subredditText = comment.subreddit.toLowerCase();
-                  let matchCount = 0;
-                  regexes.forEach(re => {
-                    const bodyMatches = comment.body.match(re);
-                    if (bodyMatches) matchCount += bodyMatches.length;
-                    if (re.test(authorText)) matchCount++;
-                    if (re.test(subredditText)) matchCount++;
-                  });
-                  if (matchCount > 0) {
-                    comment.matchScore = matchCount;
-                    comment.score = matchCount + (comment.upvotes / 100);
-                    return true;
-                  }
-                  return false;
-                });
-                break;
-            }
-          }
-
-          filteredComments.sort((a, b) => ((b.score || 0) - (a.score || 0)));
-          saveToCache(query, filterType, filteredComments);
-          resolve(filteredComments.slice(0, limit));
-        } catch (error) {
-          console.error('Error during comment processing:', error);
-          resolve(mockComments.slice(0, limit));
+    // Process and score all comments
+    let allComments = results
+      .filter((comment): comment is RedditComment => !!comment)
+      .reduce((unique, comment) => {
+        if (!unique.some(c => c.id === comment.id)) {
+          unique.push(comment);
         }
-      }, timeout);
+        return unique;
+      }, [] as RedditComment[]);
 
-      const safetyTimeout = setTimeout(() => {
-        clearTimeout(timeoutId);
-        console.warn('Safety timeout triggered, returning available results');
-        const results = allComments.length > 0 ? allComments.slice(0, limit) : mockComments.slice(0, limit);
-        resolve(results);
-      }, timeout + 5000);
+    // Apply scoring
+    allComments = allComments.map(comment => {
+      const score = calculateMatchScore(comment, searchTerms);
+      return { ...comment, score, matchScore: score };
     });
+
+    // Sort by score (descending) and limit
+    allComments.sort((a, b) => (b.score || 0) - (a.score || 0));
+    return allComments.slice(0, limit);
+
   } catch (error) {
-    console.error('Error fetching Reddit data:', error);
-    const filteredMockComments = mockComments.slice(0, limit);
-    filteredMockComments.forEach(comment => {
-      comment.score = comment.upvotes / 100;
-    });
-    return filteredMockComments;
+    console.error('Enhanced search error:', error);
+    return [];
   }
 }
 
-// CommentList Component
-const CommentList = ({ fetchComments }: { fetchComments: (page: number) => Promise<RedditComment[]> }) => {
-  const [comments, setComments] = useState<RedditComment[]>([]);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    loadMoreComments();
-  }, []);
-
-  const loadMoreComments = async () => {
-    if (loading) return;
-    setLoading(true);
-    try {
-      const newComments = await fetchComments(page);
-      setComments(prev => [...prev, ...newComments]);
-      setPage(prev => prev + 1);
-    } catch (error) {
-      console.error('Error loading comments:', error);
-    } finally {
-      setLoading(false);
-    }
+// Helper function to convert Reddit API items
+function convertRedditItemToComment(item: any): RedditComment {
+  return {
+    id: item.data.id,
+    author: item.data.author,
+    body: item.data.body,
+    subreddit: item.data.subreddit,
+    upvotes: item.data.score,
+    timestamp: new Date(item.data.created_utc * 1000).toISOString(),
+    url: `https://reddit.com${item.data.permalink}`
   };
+}
 
-  return (
-    <div>
-      {comments.map(comment => (
-        <div key={comment.id}>
-          <h3>{comment.author}</h3>
-          <p>{comment.body}</p>
-        </div>
-      ))}
-      <button onClick={loadMoreComments} disabled={loading}>
-        {loading ? 'Loading...' : 'Load More'}
-      </button>
-    </div>
-  );
-};
+// Usage example
+async function exampleUsage() {
+  const results = await enhancedSearchComments('typescript react', 'all', 50);
+  console.log(`Found ${results.length} comments:`);
+  results.forEach((comment, i) => {
+    console.log(`#${i + 1} [r/${comment.subreddit}] ${comment.author}: ${comment.body.substring(0, 60)}... (Score: ${comment.score?.toFixed(2)})`);
+  });
+}
 
-// Main App Component
-const App = () => {
-  const [query, setQuery] = useState('');
-  const [filterType, setFilterType] = useState('all');
-
-  const handleSearch = async (page: number) => {
-    try {
-      const results = await searchComments(query, filterType, 20, 2000, page);
-      return results;
-    } catch (error) {
-      console.error('Search failed:', error);
-      return [];
-    }
-  };
-
-  return (
-    <div>
-      <input
-        type="text"
-        placeholder="Search..."
-        value={query}
-        onChange={e => setQuery(e.target.value)}
-      />
-      <select value={filterType} onChange={e => setFilterType(e.target.value)}>
-        <option value="all">All</option>
-        <option value="keyword">Keyword</option>
-        <option value="subreddit">Subreddit</option>
-        <option value="author">Author</option>
-      </select>
-      <CommentList fetchComments={handleSearch} />
-    </div>
-  );
-};
-
-export default App;
+// Debug stats
+function logSearchStats(query: string, results: RedditComment[]) {
+  console.log(`Search Statistics:
+  Query: "${query}"
+  Total results: ${results.length}
+  Top score: ${results[0]?.score?.toFixed(2) || 'N/A'}
+  Average score: ${(results.reduce((sum, c) => sum + (c.score || 0), 0) / results.length).toFixed(2)}
+  Subreddits: ${[...new Set(results.map(c => c.subreddit))].join(', ')}`);
+}
