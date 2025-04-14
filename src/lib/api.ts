@@ -15,7 +15,7 @@ export interface RedditComment {
 
 // Reddit API credentials and endpoints
 const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID || 'xmNNjvzBns1KvnjE5M7WEg';
-const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET || 'N39e8RHrhC'strings N39e8RHrhC0XhHnxzUEhwkq5tbrJWw';
+const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET || 'N39e8RHrhC0XhHnxzUEhwkq5tbrJWw';
 const REDDIT_API_BASE = 'https://oauth.reddit.com';
 const REDDIT_AUTH_URL = 'https://www.reddit.com/api/v1/access_token';
 
@@ -159,7 +159,7 @@ const mockComments: RedditComment[] = [
 export async function searchComments(
   query: string,
   filterType: string = 'all',
-  limit: number = 20,
+  limit: number = 100, // Updated default to 100
   timeout: number = 8000,
   page: number = 1
 ): Promise<RedditComment[]> {
@@ -394,7 +394,7 @@ const App = () => {
     async (currentPage: number) => {
       setIsSearching(true);
       try {
-        return await searchComments(query, filterType, 20, 5000, currentPage);
+        return await searchComments(query, filterType, 100, 5000, currentPage); // Updated to 100
       } catch (error) {
         console.error('Search failed:', error);
         return [];
